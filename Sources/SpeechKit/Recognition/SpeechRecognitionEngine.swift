@@ -132,11 +132,12 @@ public final class SpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
         error = nil
         lastResult = nil
 
-        // Start consuming results
-        startResultsConsumer()
-
-        // Start the provider
+        // Start the provider FIRST - this creates a fresh results stream
+        // (AsyncStream is single-consumer, so provider creates new stream each session)
         try await provider.startListening(locale: locale)
+
+        // THEN start consuming results - now we get the new stream reference
+        startResultsConsumer()
     }
 
     /// Stops listening for speech.

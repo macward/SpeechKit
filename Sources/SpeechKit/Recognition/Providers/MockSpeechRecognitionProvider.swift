@@ -40,16 +40,8 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { [weak self] continuation in
-            self?.resultsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.resultsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The results stream (recreated each time startListening is called)
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Test Hooks
 
@@ -73,7 +65,19 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
 
     // MARK: - Lifecycle
 
-    public init() {}
+    public init() {
+        // Initialize with a fresh stream
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+    }
+
+    /// Creates a fresh results stream for a new listening session.
+    private func createResultsStream() {
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+    }
 
     // MARK: - Public Methods
 
@@ -95,6 +99,9 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
             throw SpeechRecognitionError.notAuthorized
         }
 
+        // Create a fresh results stream for this listening session
+        createResultsStream()
+
         isListening = true
         partialTranscription = ""
     }
@@ -102,7 +109,9 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
     public func stopListening() {
         stopListeningCallCount += 1
         isListening = false
-        resultsContinuation?.finish()
+        // Note: Do NOT finish the results stream here.
+        // The stream should remain alive for the lifetime of the provider
+        // so it can be reused when startListening() is called again.
     }
 
     // MARK: - Simulation Methods

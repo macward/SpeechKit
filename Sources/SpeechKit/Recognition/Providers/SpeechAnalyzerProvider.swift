@@ -49,16 +49,8 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { [weak self] continuation in
-            self?.resultsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.resultsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The results stream (recreated each time startListening is called)
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Private Properties
 
@@ -77,6 +69,18 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
     /// - Parameter silenceThreshold: Seconds of silence before speech is considered ended (default: 1.5)
     public init(silenceThreshold: TimeInterval = 1.5) {
         self.silenceThreshold = silenceThreshold
+
+        // Initialize with a fresh stream
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+    }
+
+    /// Creates a fresh results stream for a new listening session.
+    private func createResultsStream() {
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
     }
 
     // MARK: - Public Methods
@@ -129,7 +133,9 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
         // analyzer?.finalizeAndFinishThroughEndOfInput()
 
         isListening = false
-        resultsContinuation?.finish()
+        // Note: Do NOT finish the results stream here.
+        // The stream should remain alive for the lifetime of the provider
+        // so it can be reused when startListening() is called again.
     }
 
     // MARK: - Model Management

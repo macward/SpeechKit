@@ -55,17 +55,9 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    /// The results stream
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { [weak self] continuation in
-            self?.resultsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.resultsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The results stream (recreated each time startListening is called)
+    /// AsyncStream is single-consumer, so we need a fresh stream for each listening session
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Private Properties
 
@@ -93,19 +85,30 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     /// - Parameter silenceThreshold: Seconds of silence before speech is considered ended (default: 1.5)
     public init(silenceThreshold: TimeInterval = 1.5) {
         self.silenceThreshold = silenceThreshold
+
+        // Initialize with a fresh stream (before super.init())
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+
         super.init()
         updateAuthorizationStatus()
+    }
+
+    /// Creates a fresh results stream for a new listening session.
+    /// AsyncStream is single-consumer, so we need a new stream each time.
+    private func createResultsStream() {
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
     }
 
     // MARK: - Public Methods
 
     public func requestAuthorization() async -> SpeechAuthorizationStatus {
-        // Request speech recognition authorization
-        let speechStatus = await withCheckedContinuation { (continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
+        // Request speech recognition authorization using nonisolated helper
+        // to avoid MainActor isolation being inherited by the callback
+        let speechStatus = await Self.requestSpeechAuthorization()
 
         guard speechStatus == .authorized else {
             let mapped = mapAuthorizationStatus(speechStatus)
@@ -119,6 +122,22 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
         let finalStatus: SpeechAuthorizationStatus = micStatus ? .authorized : .denied
         authorizationStatus = finalStatus
         return finalStatus
+    }
+
+    // MARK: - Private Static Methods
+
+    /// Requests speech authorization without MainActor isolation.
+    ///
+    /// This is extracted as a static nonisolated function to ensure the callback
+    /// from `SFSpeechRecognizer.requestAuthorization` doesn't inherit MainActor
+    /// context, which would cause a dispatch assertion failure when the callback
+    /// runs on a background queue.
+    private nonisolated static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
     }
 
     public func startListening(locale: Locale = .current) async throws {
@@ -138,6 +157,10 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
 
         // Ensure any previous session is stopped
         stopListening()
+
+        // Create a fresh results stream for this listening session
+        // AsyncStream is single-consumer, so we need a new stream each time
+        createResultsStream()
 
         // Create speech recognizer for locale
         guard let recognizer = SFSpeechRecognizer(locale: locale),
@@ -225,8 +248,9 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
         speechRecognizer = nil
         isListening = false
 
-        // Finish the results stream
-        resultsContinuation?.finish()
+        // Note: Do NOT finish the results stream here.
+        // The stream should remain alive for the lifetime of the provider
+        // so it can be reused when startListening() is called again.
     }
 
     // MARK: - Private Methods
@@ -387,11 +411,12 @@ public final class SFSpeechRecognizerProvider: SpeechRecognitionProvider {
     public private(set) var isListening: Bool = false
     public private(set) var authorizationStatus: SpeechAuthorizationStatus = .notDetermined
     public private(set) var partialTranscription: String = ""
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { $0.finish() }
-    }
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
-    public init(silenceThreshold: TimeInterval = 1.5) {}
+    public init(silenceThreshold: TimeInterval = 1.5) {
+        let (stream, _) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+    }
 
     public func requestAuthorization() async -> SpeechAuthorizationStatus {
         authorizationStatus = .denied
