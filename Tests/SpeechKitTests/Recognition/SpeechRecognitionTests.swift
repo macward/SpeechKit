@@ -456,9 +456,18 @@ final class MockSpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
     var lastResult: SpeechRecognitionResult?
     var error: SpeechRecognitionError?
 
+    let results: AsyncStream<SpeechRecognitionResult>
+    private let resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation
+
     var requestAuthorizationResult: SpeechAuthorizationStatus = .authorized
     var startListeningError: SpeechRecognitionError?
     var simulatedTranscriptions: [String] = []
+
+    init() {
+        var continuation: AsyncStream<SpeechRecognitionResult>.Continuation!
+        self.results = AsyncStream { continuation = $0 }
+        self.resultsContinuation = continuation
+    }
 
     func requestAuthorization() async -> SpeechAuthorizationStatus {
         authorizationStatus = requestAuthorizationResult
@@ -478,8 +487,10 @@ final class MockSpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
 
     func simulateTranscription(_ text: String, isFinal: Bool) {
         partialTranscription = text
+        let result = SpeechRecognitionResult(text: text, isFinal: isFinal)
+        resultsContinuation.yield(result)
         if isFinal {
-            lastResult = SpeechRecognitionResult(text: text, isFinal: true)
+            lastResult = result
             isListening = false
         }
     }
