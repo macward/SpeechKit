@@ -100,12 +100,9 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     // MARK: - Public Methods
 
     public func requestAuthorization() async -> SpeechAuthorizationStatus {
-        // Request speech recognition authorization
-        let speechStatus = await withCheckedContinuation { (continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
+        // Request speech recognition authorization using nonisolated helper
+        // to avoid MainActor isolation being inherited by the callback
+        let speechStatus = await Self.requestSpeechAuthorization()
 
         guard speechStatus == .authorized else {
             let mapped = mapAuthorizationStatus(speechStatus)
@@ -119,6 +116,22 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
         let finalStatus: SpeechAuthorizationStatus = micStatus ? .authorized : .denied
         authorizationStatus = finalStatus
         return finalStatus
+    }
+
+    // MARK: - Private Static Methods
+
+    /// Requests speech authorization without MainActor isolation.
+    ///
+    /// This is extracted as a static nonisolated function to ensure the callback
+    /// from `SFSpeechRecognizer.requestAuthorization` doesn't inherit MainActor
+    /// context, which would cause a dispatch assertion failure when the callback
+    /// runs on a background queue.
+    private nonisolated static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
     }
 
     public func startListening(locale: Locale = .current) async throws {
