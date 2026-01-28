@@ -236,8 +236,9 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
         speechRecognizer = nil
         isListening = false
 
-        // Finish the results stream
-        resultsContinuation?.finish()
+        // Note: Do NOT finish the results stream here.
+        // The stream should remain alive for the lifetime of the provider
+        // so it can be reused when startListening() is called again.
     }
 
     // MARK: - Private Methods

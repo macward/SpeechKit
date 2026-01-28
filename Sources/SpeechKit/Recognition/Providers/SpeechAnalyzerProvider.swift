@@ -127,7 +127,9 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
         // analyzer?.finalizeAndFinishThroughEndOfInput()
 
         isListening = false
-        resultsContinuation?.finish()
+        // Note: Do NOT finish the results stream here.
+        // The stream should remain alive for the lifetime of the provider
+        // so it can be reused when startListening() is called again.
     }
 
     // MARK: - Model Management
