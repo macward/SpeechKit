@@ -104,17 +104,8 @@ public final class AppleSpeechSynthesisProvider: NSObject, SpeechSynthesisProvid
     /// Stream continuation for emitting events
     private var eventsContinuation: AsyncStream<SpeechSynthesisEvent>.Continuation?
 
-    /// The events stream
-    public var events: AsyncStream<SpeechSynthesisEvent> {
-        AsyncStream { [weak self] continuation in
-            self?.eventsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.eventsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The events stream (created once at init to ensure single continuation)
+    public private(set) var events: AsyncStream<SpeechSynthesisEvent>
 
     // MARK: - Private Properties
 
@@ -140,6 +131,13 @@ public final class AppleSpeechSynthesisProvider: NSObject, SpeechSynthesisProvid
     public init(configuration: AppleSpeechSynthesisConfiguration = .default) {
         self.configuration = configuration
         self.synthesizer = AVSpeechSynthesizer()
+
+        // Create events stream once to ensure single continuation
+        // Using makeStream() allows initialization before super.init()
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechSynthesisEvent.self)
+        self.events = stream
+        self.eventsContinuation = continuation
+
         super.init()
         self.synthesizer.delegate = self
     }
@@ -315,11 +313,12 @@ public final class AppleSpeechSynthesisProvider: SpeechSynthesisProvider {
     public private(set) var isPaused: Bool = false
     public var capabilities: Set<SpeechSynthesisCapability> { [] }
 
-    public var events: AsyncStream<SpeechSynthesisEvent> {
-        AsyncStream { $0.finish() }
-    }
+    public private(set) var events: AsyncStream<SpeechSynthesisEvent>
 
-    public init(configuration: AppleSpeechSynthesisConfiguration = .default) {}
+    public init(configuration: AppleSpeechSynthesisConfiguration = .default) {
+        let (stream, _) = AsyncStream.makeStream(of: SpeechSynthesisEvent.self)
+        self.events = stream
+    }
 
     public func speak(text: String, voice: String?) async throws {
         throw SpeechSynthesisProviderError.providerNotAvailable(.apple)

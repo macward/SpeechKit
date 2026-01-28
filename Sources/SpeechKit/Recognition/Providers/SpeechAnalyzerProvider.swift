@@ -49,16 +49,8 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { [weak self] continuation in
-            self?.resultsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.resultsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The results stream (created once at init to ensure single continuation)
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Private Properties
 
@@ -77,6 +69,12 @@ public final class SpeechAnalyzerProvider: SpeechRecognitionProvider {
     /// - Parameter silenceThreshold: Seconds of silence before speech is considered ended (default: 1.5)
     public init(silenceThreshold: TimeInterval = 1.5) {
         self.silenceThreshold = silenceThreshold
+
+        // Create results stream once to ensure single continuation
+        // Using makeStream() for clean initialization
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
     }
 
     // MARK: - Public Methods

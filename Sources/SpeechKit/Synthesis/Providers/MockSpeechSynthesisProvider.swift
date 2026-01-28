@@ -44,16 +44,8 @@ public final class MockSpeechSynthesisProvider: SpeechSynthesisProvider {
     /// Stream continuation for emitting events
     private var eventsContinuation: AsyncStream<SpeechSynthesisEvent>.Continuation?
 
-    public var events: AsyncStream<SpeechSynthesisEvent> {
-        AsyncStream { [weak self] continuation in
-            self?.eventsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.eventsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The events stream (created once at init to ensure single continuation)
+    public private(set) var events: AsyncStream<SpeechSynthesisEvent>
 
     // MARK: - Test Hooks
 
@@ -86,7 +78,13 @@ public final class MockSpeechSynthesisProvider: SpeechSynthesisProvider {
 
     // MARK: - Lifecycle
 
-    public init() {}
+    public init() {
+        // Create events stream once to ensure single continuation
+        // Using makeStream() for clean initialization
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechSynthesisEvent.self)
+        self.events = stream
+        self.eventsContinuation = continuation
+    }
 
     // MARK: - Public Methods
 

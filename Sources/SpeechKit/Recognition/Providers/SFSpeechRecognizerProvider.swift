@@ -55,17 +55,8 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    /// The results stream
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { [weak self] continuation in
-            self?.resultsContinuation = continuation
-            continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.resultsContinuation = nil
-                }
-            }
-        }
-    }
+    /// The results stream (created once at init to ensure single continuation)
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Private Properties
 
@@ -93,6 +84,13 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     /// - Parameter silenceThreshold: Seconds of silence before speech is considered ended (default: 1.5)
     public init(silenceThreshold: TimeInterval = 1.5) {
         self.silenceThreshold = silenceThreshold
+
+        // Create results stream once to ensure single continuation
+        // Using makeStream() allows initialization before super.init()
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+
         super.init()
         updateAuthorizationStatus()
     }
@@ -400,11 +398,12 @@ public final class SFSpeechRecognizerProvider: SpeechRecognitionProvider {
     public private(set) var isListening: Bool = false
     public private(set) var authorizationStatus: SpeechAuthorizationStatus = .notDetermined
     public private(set) var partialTranscription: String = ""
-    public var results: AsyncStream<SpeechRecognitionResult> {
-        AsyncStream { $0.finish() }
-    }
+    public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
-    public init(silenceThreshold: TimeInterval = 1.5) {}
+    public init(silenceThreshold: TimeInterval = 1.5) {
+        let (stream, _) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+    }
 
     public func requestAuthorization() async -> SpeechAuthorizationStatus {
         authorizationStatus = .denied
