@@ -20,6 +20,16 @@ public protocol SpeechRecognitionEngineProtocol: AnyObject {
     /// The current error, if any
     var error: SpeechRecognitionError? { get }
 
+    /// Stream of recognition results.
+    ///
+    /// Use this to receive real-time transcription updates:
+    /// ```swift
+    /// for await result in engine.results {
+    ///     print(result.text)
+    /// }
+    /// ```
+    var results: AsyncStream<SpeechRecognitionResult> { get }
+
     /// Requests authorization for speech recognition and microphone
     func requestAuthorization() async -> SpeechAuthorizationStatus
 
@@ -61,6 +71,12 @@ public final class SpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
     /// Task for consuming the results stream
     private var resultsTask: Task<Void, Never>?
 
+    /// Stream of recognition results for external consumers
+    public let results: AsyncStream<SpeechRecognitionResult>
+
+    /// Continuation for emitting results to the public stream
+    private let resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation
+
     /// Whether the engine is currently listening
     public var isListening: Bool {
         provider.isListening
@@ -101,6 +117,11 @@ public final class SpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
         )
         self.providerType = resolvedType
         self.provider = provider
+
+        // Create the public results stream
+        var continuation: AsyncStream<SpeechRecognitionResult>.Continuation!
+        self.results = AsyncStream { continuation = $0 }
+        self.resultsContinuation = continuation
     }
 
     /// Creates a new SpeechRecognitionEngine with a custom provider.
@@ -114,6 +135,11 @@ public final class SpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
         default:
             self.providerType = .auto
         }
+
+        // Create the public results stream
+        var continuation: AsyncStream<SpeechRecognitionResult>.Continuation!
+        self.results = AsyncStream { continuation = $0 }
+        self.resultsContinuation = continuation
     }
 
     // MARK: - Public Methods
@@ -192,6 +218,9 @@ public final class SpeechRecognitionEngine: SpeechRecognitionEngineProtocol {
     }
 
     private func handleResult(_ result: SpeechRecognitionResult) {
+        // Re-emit to the public stream for external consumers
+        resultsContinuation.yield(result)
+
         if result.isFinal {
             lastResult = result
             onFinalTranscription?(result)
