@@ -55,7 +55,8 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    /// The results stream (created once at init to ensure single continuation)
+    /// The results stream (recreated each time startListening is called)
+    /// AsyncStream is single-consumer, so we need a fresh stream for each listening session
     public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Private Properties
@@ -85,14 +86,21 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
     public init(silenceThreshold: TimeInterval = 1.5) {
         self.silenceThreshold = silenceThreshold
 
-        // Create results stream once to ensure single continuation
-        // Using makeStream() allows initialization before super.init()
+        // Initialize with a fresh stream (before super.init())
         let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
         self.results = stream
         self.resultsContinuation = continuation
 
         super.init()
         updateAuthorizationStatus()
+    }
+
+    /// Creates a fresh results stream for a new listening session.
+    /// AsyncStream is single-consumer, so we need a new stream each time.
+    private func createResultsStream() {
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
     }
 
     // MARK: - Public Methods
@@ -149,6 +157,10 @@ public final class SFSpeechRecognizerProvider: NSObject, SpeechRecognitionProvid
 
         // Ensure any previous session is stopped
         stopListening()
+
+        // Create a fresh results stream for this listening session
+        // AsyncStream is single-consumer, so we need a new stream each time
+        createResultsStream()
 
         // Create speech recognizer for locale
         guard let recognizer = SFSpeechRecognizer(locale: locale),

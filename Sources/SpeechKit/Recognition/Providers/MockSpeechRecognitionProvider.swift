@@ -40,7 +40,7 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
     /// Stream continuation for emitting results
     private var resultsContinuation: AsyncStream<SpeechRecognitionResult>.Continuation?
 
-    /// The results stream (created once at init to ensure single continuation)
+    /// The results stream (recreated each time startListening is called)
     public private(set) var results: AsyncStream<SpeechRecognitionResult>
 
     // MARK: - Test Hooks
@@ -66,8 +66,14 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
     // MARK: - Lifecycle
 
     public init() {
-        // Create results stream once to ensure single continuation
-        // Using makeStream() for clean initialization
+        // Initialize with a fresh stream
+        let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
+        self.results = stream
+        self.resultsContinuation = continuation
+    }
+
+    /// Creates a fresh results stream for a new listening session.
+    private func createResultsStream() {
         let (stream, continuation) = AsyncStream.makeStream(of: SpeechRecognitionResult.self)
         self.results = stream
         self.resultsContinuation = continuation
@@ -92,6 +98,9 @@ public final class MockSpeechRecognitionProvider: SpeechRecognitionProvider {
         guard authorizationStatus == .authorized else {
             throw SpeechRecognitionError.notAuthorized
         }
+
+        // Create a fresh results stream for this listening session
+        createResultsStream()
 
         isListening = true
         partialTranscription = ""
